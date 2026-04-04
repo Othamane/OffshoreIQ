@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OffshoreIQ — Moroccan Nearshore Talent Graph</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/main.css" />
+</head>
+<body>
+
+<!-- ── Header ───────────────────────────────────────────────────── -->
+<header class="oiq-header">
+  <div class="oiq-header__brand">
+    <span class="oiq-header__logo">⬡</span>
+    <span class="oiq-header__title">OffshoreIQ</span>
+    <span class="oiq-header__badge">GraphRAG · MAS · Neo4j</span>
+  </div>
+  <div class="oiq-header__meta">
+    <span class="oiq-header__meta-item">🇲🇦 Moroccan Nearshore Intelligence</span>
+    <button class="oiq-btn oiq-btn--ghost" id="seedBtn" onclick="seedDatabase()">
+      ⟳ Seed Database
+    </button>
+  </div>
+</header>
+
+<!-- ── Main Layout ───────────────────────────────────────────────── -->
+<main class="oiq-layout">
+
+  <!-- LEFT: Input Panel -->
+  <section class="oiq-panel oiq-panel--input">
+    <div class="oiq-panel__header">
+      <h2 class="oiq-panel__title">📋 RFP Analysis</h2>
+      <p class="oiq-panel__subtitle">Paste a client Request for Proposal and let the multi-agent system match your team.</p>
+    </div>
+
+    <div class="oiq-form">
+      <label class="oiq-label" for="rfpInput">RFP Document</label>
+      <textarea
+        id="rfpInput"
+        class="oiq-textarea"
+        rows="10"
+        placeholder="e.g. We are looking for a nearshore team for a core banking modernization project for a French bank. The team must have strong SAP S/4HANA expertise, GDPR compliance experience, and be French-speaking. At least one team member should be SAP certified. The project will run for 18 months..."
+      ></textarea>
+
+      <div class="oiq-example-rfps">
+        <p class="oiq-label">Quick examples:</p>
+        <button class="oiq-btn oiq-btn--chip" onclick="loadExample('banking')">🏦 Banking SAP</button>
+        <button class="oiq-btn oiq-btn--chip" onclick="loadExample('cyber')">🔐 Cybersecurity</button>
+        <button class="oiq-btn oiq-btn--chip" onclick="loadExample('devops')">⚙️ Cloud DevOps</button>
+        <button class="oiq-btn oiq-btn--chip" onclick="loadExample('crm')">📊 CRM Salesforce</button>
+      </div>
+
+      <button class="oiq-btn oiq-btn--primary" id="analyzeBtn" onclick="analyzeRFP()">
+        <span id="analyzeBtnText">🔍 Analyze RFP</span>
+        <span id="analyzeBtnSpinner" class="oiq-spinner" style="display:none"></span>
+      </button>
+    </div>
+
+    <!-- Agent Trace -->
+    <div class="oiq-trace" id="agentTrace" style="display:none">
+      <h3 class="oiq-trace__title">🤖 Agent Pipeline Trace</h3>
+      <div id="traceSteps"></div>
+    </div>
+  </section>
+
+  <!-- RIGHT: Results Panel -->
+  <section class="oiq-panel oiq-panel--results" id="resultsPanel" style="display:none">
+
+    <!-- Requirements Extracted -->
+    <div class="oiq-card" id="requirementsCard">
+      <h3 class="oiq-card__title">📌 Extracted Requirements</h3>
+      <div id="requirementsContent"></div>
+    </div>
+
+    <!-- Graph Visualization -->
+    <div class="oiq-card oiq-card--graph">
+      <h3 class="oiq-card__title">
+        🕸️ Knowledge Graph
+        <span class="oiq-card__subtitle">Multi-hop Neo4j traversal result</span>
+      </h3>
+      <div class="oiq-graph-legend" id="graphLegend"></div>
+      <div id="graphContainer">
+        <svg id="graphSvg"></svg>
+      </div>
+      <p class="oiq-graph-hint">Drag nodes · Scroll to zoom · Hover for details</p>
+    </div>
+
+    <!-- Matched Engineers -->
+    <div class="oiq-card" id="engineersCard">
+      <h3 class="oiq-card__title">👥 Recommended Team</h3>
+      <div id="engineersGrid"></div>
+    </div>
+
+    <!-- Skill Gaps -->
+    <div class="oiq-card" id="gapsCard" style="display:none">
+      <h3 class="oiq-card__title">⚠️ Skill Gap Analysis</h3>
+      <div id="gapsContent"></div>
+    </div>
+
+    <!-- Proposal -->
+    <div class="oiq-card oiq-card--proposal">
+      <h3 class="oiq-card__title">📄 Generated Proposal</h3>
+      <div id="proposalContent"></div>
+      <button class="oiq-btn oiq-btn--ghost oiq-btn--sm" onclick="copyProposal()">📋 Copy Proposal</button>
+    </div>
+
+  </section>
+</main>
+
+<!-- ── Toast Notification ────────────────────────────────────────── -->
+<div id="toast" class="oiq-toast"></div>
+
+<script src="/static/js/main.js"></script>
+</body>
+</html>

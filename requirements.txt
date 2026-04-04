@@ -1,0 +1,22 @@
+# ── Web Framework ─────────────────────────────────────────────────
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+python-multipart==0.0.20
+jinja2==3.1.6
+
+# ── LangChain ecosystem (all must share langchain-core >=0.3) ─────
+# These three MUST be upgraded together — do not mix old+new versions
+langchain==0.3.25
+langchain-core==0.3.59
+langchain-community==0.3.24
+langchain-groq==0.3.2          # Groq LLM provider (free API)
+langgraph==0.4.1               # Multi-agent orchestration
+
+# ── Neo4j ─────────────────────────────────────────────────────────
+neo4j==5.28.1
+
+# ── Config & Utilities ────────────────────────────────────────────
+pydantic==2.11.4
+pydantic-settings==2.9.1
+python-dotenv==1.1.0
+httpx==0.28.1
