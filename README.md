@@ -22,7 +22,7 @@
 
 ## 🎯 What is OffshoreIQ?
 
-OffshoreIQ is a **Proof of Concept** demonstrating **true GraphRAG** combined with a **genuine Multi-Agent System** applied to Morocco's nearshore IT offshoring sector.
+OffshoreIQ is a **Proof of Concept** demonstrating **true GraphRAG** combined with an **Agentic Pipeline** applied to Morocco's nearshore IT offshoring sector.
 
 ### The Problem
 
