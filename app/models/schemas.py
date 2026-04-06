@@ -5,19 +5,13 @@ Pydantic models for request/response validation.
 from pydantic import BaseModel, Field
 
 
-# ── Request Models ─────────────────────────────────────────────────────────────
-
 class RFPRequest(BaseModel):
     rfp_text: str = Field(
         ...,
         min_length=20,
         description="Raw RFP text describing the client's requirements.",
-        examples=["We need a team with SAP S/4HANA expertise, GDPR compliance, "
-                  "French-speaking, for a banking modernization project."],
     )
 
-
-# ── Response Models ────────────────────────────────────────────────────────────
 
 class EngineerMatch(BaseModel):
     id: str
@@ -39,6 +33,7 @@ class AgentStep(BaseModel):
     agent: str
     status: str
     output: str
+    tools_used: list[str] = []  # which tools the LLM called in this step
 
 
 class RFPResponse(BaseModel):
@@ -48,4 +43,4 @@ class RFPResponse(BaseModel):
     skill_gaps: list[SkillGap]
     proposal_text: str
     agent_trace: list[AgentStep]
-    graph_data: dict  # nodes + edges for visualization
+    graph_data: dict

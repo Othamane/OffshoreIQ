@@ -1,5 +1,6 @@
 """
 Data seeder: populates Neo4j with realistic simulated offshoring data.
+Also creates the vector index and embeds project descriptions for true GraphRAG.
 Idempotent — safe to run multiple times (uses MERGE).
 """
 
@@ -61,9 +62,13 @@ CLIENTS = [
     {"id": "cli008", "name": "TotalEnergies",     "country": "France",  "sector": "Energy"},
 ]
 
+# Projects now include rich descriptions — these are what get embedded for GraphRAG
 PROJECTS = [
     {
         "id": "prj001", "name": "Core Banking Modernization",
+        "description": "End-to-end modernization of core banking infrastructure for a major French bank. "
+                       "Migration from legacy COBOL systems to Java Spring Boot microservices with SAP S/4HANA integration. "
+                       "Full GDPR and PCI-DSS compliance. French-speaking team required for daily client communication.",
         "client_id": "cli001", "esn_id": "esn001",
         "duration_months": 18, "team_size": 8,
         "engineer_ids": ["eng001", "eng003", "eng006"],
@@ -72,6 +77,9 @@ PROJECTS = [
     },
     {
         "id": "prj002", "name": "Digital Insurance Platform",
+        "description": "Cloud-native insurance policy management platform built on Azure. "
+                       "Python FastAPI backend, React frontend, GDPR-compliant data architecture. "
+                       "ISO 27001 certified delivery process for a French insurance group.",
         "client_id": "cli002", "esn_id": "esn002",
         "duration_months": 12, "team_size": 5,
         "engineer_ids": ["eng002", "eng005"],
@@ -80,6 +88,9 @@ PROJECTS = [
     },
     {
         "id": "prj003", "name": "5G Network Analytics Dashboard",
+        "description": "Real-time analytics platform for 5G network performance monitoring. "
+                       "Data engineering pipeline on AWS, Power BI dashboards for operations teams. "
+                       "ISO 27001 security controls for a French telecom operator.",
         "client_id": "cli003", "esn_id": "esn003",
         "duration_months": 9, "team_size": 4,
         "engineer_ids": ["eng002", "eng007"],
@@ -88,6 +99,9 @@ PROJECTS = [
     },
     {
         "id": "prj004", "name": "SAP S/4HANA Migration",
+        "description": "Large-scale migration of ERP systems to SAP S/4HANA for a Spanish bank. "
+                       "Full GDPR compliance and SOC 2 certification. "
+                       "Certified SAP consultants required. French and Spanish communication.",
         "client_id": "cli004", "esn_id": "esn001",
         "duration_months": 24, "team_size": 10,
         "engineer_ids": ["eng001", "eng003", "eng008"],
@@ -96,6 +110,9 @@ PROJECTS = [
     },
     {
         "id": "prj005", "name": "E-Commerce Platform Rebuild",
+        "description": "Complete rebuild of e-commerce platform using React and Vue.js frontend, "
+                       "Python backend, MongoDB database. Agile delivery methodology. "
+                       "GDPR-compliant customer data handling for a French retail giant.",
         "client_id": "cli005", "esn_id": "esn004",
         "duration_months": 10, "team_size": 6,
         "engineer_ids": ["eng004", "eng005", "eng007"],
@@ -104,6 +121,9 @@ PROJECTS = [
     },
     {
         "id": "prj006", "name": "Cyber Risk Management Platform",
+        "description": "Enterprise cybersecurity risk assessment and management platform. "
+                       "ISO 27001 and GDPR compliance for a German insurance group. "
+                       "CISSP-certified security architects required. Azure cloud infrastructure.",
         "client_id": "cli006", "esn_id": "esn002",
         "duration_months": 14, "team_size": 5,
         "engineer_ids": ["eng006", "eng008"],
@@ -112,6 +132,9 @@ PROJECTS = [
     },
     {
         "id": "prj007", "name": "CRM Salesforce Integration",
+        "description": "Salesforce CRM integration and customization for customer experience management. "
+                       "Python REST API integrations, Agile/Scrum delivery. "
+                       "GDPR compliance for a Spanish telecom company.",
         "client_id": "cli007", "esn_id": "esn005",
         "duration_months": 6, "team_size": 3,
         "engineer_ids": ["eng004", "eng007"],
@@ -120,6 +143,9 @@ PROJECTS = [
     },
     {
         "id": "prj008", "name": "Cloud Migration & DevOps",
+        "description": "Full cloud migration and DevOps transformation for an energy company. "
+                       "Kubernetes orchestration, GCP infrastructure, Python automation scripts. "
+                       "ISO 27001 and SOC 2 compliant deployment pipeline.",
         "client_id": "cli008", "esn_id": "esn003",
         "duration_months": 8, "team_size": 4,
         "engineer_ids": ["eng001", "eng005"],
@@ -128,7 +154,6 @@ PROJECTS = [
     },
 ]
 
-# Engineer → Skill proficiencies (engineer_id, skill_name, proficiency)
 ENGINEER_SKILLS = [
     ("eng001", "Java",            "expert"),
     ("eng001", "Spring Boot",     "expert"),
@@ -172,7 +197,6 @@ ENGINEER_SKILLS = [
     ("eng008", "ISO 27001",       "advanced"),
 ]
 
-# Engineer → Certification
 ENGINEER_CERTS = [
     ("eng001", "Certified Scrum Master"),
     ("eng002", "Azure Data Engineer"),
@@ -187,7 +211,6 @@ ENGINEER_CERTS = [
     ("eng004", "Salesforce Admin"),
 ]
 
-# Engineer → ESN
 ENGINEER_ESN = [
     ("eng001", "esn001"),
     ("eng002", "esn002"),
@@ -295,7 +318,7 @@ def _seed_projects() -> None:
             """
             MERGE (proj:Project {id: $id})
             SET proj.name = $name, proj.duration_months = $duration_months,
-                proj.team_size = $team_size
+                proj.team_size = $team_size, proj.description = $description
             WITH proj
             MATCH (cl:Client {id: $client_id})
             MERGE (proj)-[:FOR_CLIENT]->(cl)
@@ -305,6 +328,7 @@ def _seed_projects() -> None:
             """,
             {
                 "id": p["id"], "name": p["name"],
+                "description": p.get("description", p["name"]),
                 "duration_months": p["duration_months"],
                 "team_size": p["team_size"],
                 "client_id": p["client_id"],
@@ -375,6 +399,17 @@ def _seed_engineer_esn() -> None:
     logger.info("Seeded %d engineer-ESN relationships.", len(ENGINEER_ESN))
 
 
+def _seed_embeddings() -> None:
+    """Create vector index and embed all project descriptions for true GraphRAG."""
+    try:
+        from app.services.embedding_service import create_vector_index, embed_all_projects
+        create_vector_index()
+        count = embed_all_projects()
+        logger.info("GraphRAG embeddings ready: %d projects embedded.", count)
+    except Exception as e:
+        logger.warning("Embedding step failed (non-fatal): %s", e)
+
+
 def seed_database(clear_first: bool = True) -> dict:
     """Main entry point for seeding. Returns a summary."""
     logger.info("Starting database seed...")
@@ -393,6 +428,7 @@ def seed_database(clear_first: bool = True) -> dict:
     _seed_engineer_skills()
     _seed_engineer_certifications()
     _seed_engineer_esn()
+    _seed_embeddings()
 
     summary = db.run_query(
         """

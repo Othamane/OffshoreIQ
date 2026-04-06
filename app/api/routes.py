@@ -77,6 +77,7 @@ async def analyze_rfp(request: RFPRequest):
         agent_steps = [
             AgentStep(
                 agent=t["agent"],
+                tools_used=t.get("tools_used", []),
                 status=t["status"],
                 output=t["output"],
             )

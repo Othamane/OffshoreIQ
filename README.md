@@ -1,7 +1,7 @@
 # ⬡ OffshoreIQ
 
-> **Knowledge Graph + LLM Talent Matching for Moroccan Nearshore Offshoring**
-> Multi-Agent System · Neo4j · LangGraph · FastAPI · Groq LLM
+> **Knowledge Graph + GraphRAG + Multi-Agent IT Talent Matching for Moroccan Nearshore**
+> Real MAS (ReAct agents with bound tools) · True GraphRAG (vector + graph) · Neo4j · LangGraph · FastAPI · Groq LLM
 
 ---
 
@@ -16,124 +16,140 @@
 ### Live Knowledge Graph (D3.js + Neo4j)
 ![Knowledge Graph](docs/screenshots/03-knowledge-graph.png)
 
-### Multi-Agent Pipeline Trace
+### Multi-Agent Pipeline Trace (showing tool calls)
 ![Agent Trace](docs/screenshots/04-agent-trace.png)
 
 ---
 
 ## 🎯 What is OffshoreIQ?
 
-OffshoreIQ is a **Proof of Concept** that demonstrates how **structured graph retrieval** combined with a **Multi-Agent LLM System** can solve a real problem in Morocco's nearshore IT offshoring sector.
+OffshoreIQ is a **Proof of Concept** demonstrating **true GraphRAG** combined with a **genuine Multi-Agent System** applied to Morocco's nearshore IT offshoring sector.
 
 ### The Problem
 
-When a French bank sends an RFP to a Moroccan IT firm saying:
-
-> *"We need a team with SAP S/4HANA expertise, GDPR compliance experience, French-speaking, for an 18-month banking modernization project"*
-
-...the firm's business developer currently does this **manually**: searches spreadsheets, calls team leads, digs through old CVs, and pieces together a response over 2–4 weeks. There's no system that understands the relationships between engineers, their past projects, the clients those projects served, the compliance frameworks involved, and the certifications they hold — all at once.
-
-### The Solution
-
-OffshoreIQ models the entire talent ecosystem as a **knowledge graph in Neo4j** and uses a **4-agent LangGraph pipeline** to go from raw RFP text to a ranked team recommendation + written proposal in under 15 seconds.
-
-### Honest Technical Note — Graph Retrieval vs. GraphRAG
-
-This project uses **structured graph retrieval**, not GraphRAG in the strict sense. Here is the difference:
-
-| | This project | True GraphRAG (e.g. Microsoft's definition) |
-|---|---|---|
-| **How retrieval works** | Cypher queries with typed relationships | Vector/cosine similarity search first, then graph traversal to enrich results |
-| **Embeddings used?** | ❌ No | ✅ Yes — text is embedded and searched by semantic similarity |
-| **Entry point into the graph** | Exact match on LLM-extracted keywords | Approximate match via embedding distance |
-| **Strengths** | Precise, explainable, fast, no GPU needed | Handles fuzzy/natural language queries better |
-
-**Why structured graph retrieval is still the right choice here:** Agent 1 uses an LLM to normalize free-text RFPs into clean structured terms before any graph query runs. Once you have `skills: ["SAP S/4HANA", "GDPR"]` as structured input, exact graph traversal is strictly more accurate than cosine similarity — you want the engineer who *actually worked* on a GDPR project, not the one whose CV *sounds most like* GDPR.
-
-Adding true GraphRAG (embeddings + vector index on project descriptions) is listed in the roadmap below.
+When a French bank sends an RFP saying *"SAP S/4HANA team, GDPR compliance, French-speaking, 18 months"*, a Moroccan ESN firm currently responds manually over 2–4 weeks — digging through spreadsheets, calling team leads, assembling CVs by hand. OffshoreIQ does it in under 20 seconds.
 
 ---
 
-## 🏗️ Architecture — What Actually Happens
+## ⚙️ What Makes This a Real MAS + Real GraphRAG
 
-Here is the exact sequence of events when you click **Analyze**:
+### ✅ Real Multi-Agent System (ReAct pattern)
+
+Previous version: Python functions calling Neo4j directly, then passing results to an LLM. The LLM had no agency — it only scored candidates handed to it.
+
+Current version: Each agent has **tools bound via LangChain `bind_tools()`**. The LLM:
+1. Receives the task and a list of available tools with their schemas
+2. **Decides autonomously** which tools to call and in what order
+3. Receives tool results back as `ToolMessage` objects
+4. Loops — inspects results, calls more tools if needed, reasons toward a conclusion
+5. Produces a structured final answer
+
+This is the **ReAct (Reason + Act) pattern** — the LLM is reasoning and acting, not just generating text.
+
+### ✅ True GraphRAG (vector similarity → graph traversal)
+
+Previous version: Cypher queries with exact keyword matching. No embeddings, no similarity search. That's graph retrieval, not GraphRAG.
+
+Current version implements the two-step GraphRAG pattern:
 
 ```
-Browser → POST /api/v1/rfp/analyze (raw RFP text)
+Step 1 — Vector Search (semantic entry point):
+  Embed the RFP text with sentence-transformers (all-MiniLM-L6-v2)
+  Find the top-5 most semantically similar past projects in Neo4j vector index
+  e.g. "banking modernization GDPR" → finds prj001, prj004 by cosine similarity
+
+Step 2 — Graph Traversal (relational enrichment):
+  Starting from those semantically matched project nodes,
+  traverse the graph to find connected engineers, their skills,
+  compliance history, certifications, and sector experience
+  e.g. prj001 → [eng001, eng003, eng006] with full context
+```
+
+Neither step alone is sufficient:
+- Step 1 alone: finds similar projects but can't tell you which engineers worked on them
+- Step 2 alone: exact keyword matching misses semantic equivalents ("RGPD" vs "GDPR", "cloud migration" vs "infrastructure modernization")
+- Together: semantically aware entry + structured relational enrichment = GraphRAG
+
+---
+
+## 🏗️ Architecture
+
+```
+Browser → POST /api/v1/rfp/analyze
               │
               ▼
-      ┌───────────────────────────────────────────────────────┐
-      │            LangGraph StateGraph Pipeline              │
-      │                                                       │
-      │  State object flows through 5 nodes sequentially.    │
-      │  Each node reads from state, writes back to state.   │
-      │  The `agent_trace` key accumulates across all nodes. │
-      └───────────────────────────────────────────────────────┘
+    ┌─────────────────────────────────────────┐
+    │         LangGraph StateGraph            │
+    │   (5 nodes, shared state, append-only   │
+    │    agent_trace accumulates across all)  │
+    └─────────────────────────────────────────┘
               │
-    ┌─────────▼──────────┐
-    │  ① parse_rfp_node  │  RFPParserAgent
-    │                    │  Sends the raw RFP to Groq LLM with a strict
-    │                    │  system prompt that demands JSON-only output.
-    │                    │  Extracts: skills[], compliance_frameworks[],
-    │                    │  certifications[], sector, languages, seniority.
-    │                    │  Falls back to safe defaults if JSON parsing fails.
-    └─────────┬──────────┘
-              │  state.requirements = { skills: [...], sector: "Banking", ... }
-    ┌─────────▼──────────┐
-    │  ② build_team_node │  TeamBuilderAgent  ← CORE GRAPH RETRIEVAL NODE
-    │                    │
-    │                    │  Runs 4 multi-hop Cypher queries against Neo4j:
-    │                    │
-    │                    │  Query A — Skill match (2 hops):
-    │                    │  (Engineer)-[:HAS_SKILL {proficiency}]→(Skill)
-    │                    │  Filter by proficiency rank
-    │                    │
-    │                    │  Query B — Compliance experience (3 hops):
-    │                    │  (Engineer)-[:WORKED_ON]→(Project)
-    │                    │             -[:REQUIRED_COMPLIANCE]→(ComplianceFramework)
-    │                    │  Finds engineers with HANDS-ON compliance history
-    │                    │  (not just self-declared on a CV)
-    │                    │
-    │                    │  Query C — Sector experience (4 hops):
-    │                    │  (Engineer)-[:WORKED_ON]→(Project)
-    │                    │             -[:FOR_CLIENT]→(Client)
-    │                    │             -[:IN_SECTOR]→(Sector)
-    │                    │
-    │                    │  Query D — Certification match (2 hops):
-    │                    │  (Engineer)-[:HOLDS_CERT]→(Certification)
-    │                    │
-    │                    │  Merges all candidate IDs, fetches full profiles,
-    │                    │  then asks Groq LLM to score 0.0–1.0 based on fit.
-    └─────────┬──────────┘
-              │  state.team_engineers = [{ id, name, score, matching_skills, ... }]
-    ┌─────────▼──────────┐
-    │  ③ analyze_gaps_   │  GapAnalystAgent
-    │    node            │
-    │                    │  Graph query: which required skills has NO engineer
-    │                    │  in the proposed team?
-    │                    │  Cypher: UNWIND required_skills, LEFT JOIN against
-    │                    │  team HAS_SKILL edges, return skills with 0 matches.
-    │                    │
-    │                    │  LLM generates Morocco-specific suggestions:
-    │                    │  Simplon.co, UM6P, ENSIAS, partner ESN firms.
-    └─────────┬──────────┘
-              │  state.gaps = [{ skill, suggestion }]
-    ┌─────────▼──────────┐
-    │  ④ draft_proposal_ │  ProposalDrafterAgent
-    │    node            │
-    │                    │  Builds context block from all prior agent outputs
-    │                    │  and sends to Groq LLM with a business development
-    │                    │  persona. Output: 400-word proposal email.
-    └─────────┬──────────┘
-              │  state.proposal = "Dear Client, We are pleased to present..."
-    ┌─────────▼──────────┐
-    │  ⑤ build_graph_    │  GraphVisualizationAgent (pure Neo4j, no LLM)
-    │    data_node       │
-    │                    │  Returns all nodes + edges connected to matched
-    │                    │  engineers as { nodes, edges } for D3.js rendering.
-    └─────────┬──────────┘
+    ┌─────────▼──────────────────────────────────────────────┐
+    │  ① RFPParserAgent  (LLM, structured JSON output)       │
+    │     Input:  raw RFP text                               │
+    │     Output: skills[], compliance[], sector, languages  │
+    └─────────┬──────────────────────────────────────────────┘
+              │
+    ┌─────────▼──────────────────────────────────────────────┐
+    │  ② TeamBuilderAgent  (ReAct agent, 6 bound tools)      │
+    │                                                        │
+    │  Tools the LLM can call autonomously:                  │
+    │  ┌─────────────────────────────────────────────────┐   │
+    │  │ semantic_project_search(query)                  │   │
+    │  │   → embed query, cosine search Neo4j vector idx │   │
+    │  │   → returns top-5 similar project IDs + scores  │   │
+    │  │                                      GraphRAG①  │   │
+    │  ├─────────────────────────────────────────────────┤   │
+    │  │ graph_traverse_from_projects(project_ids)       │   │
+    │  │   → traverse: Project→Engineer + full context   │   │
+    │  │   → returns engineers with skills/compliance    │   │
+    │  │                                      GraphRAG②  │   │
+    │  ├─────────────────────────────────────────────────┤   │
+    │  │ find_engineers_by_skills(skills)                │   │
+    │  │   → 2-hop: Engineer→HAS_SKILL→Skill             │   │
+    │  ├─────────────────────────────────────────────────┤   │
+    │  │ find_engineers_by_compliance(frameworks)        │   │
+    │  │   → 3-hop: Engineer→WORKED_ON→Project           │   │
+    │  │            →REQUIRED_COMPLIANCE→Framework       │   │
+    │  ├─────────────────────────────────────────────────┤   │
+    │  │ find_engineers_by_sector(sector)                │   │
+    │  │   → 4-hop: Engineer→WORKED_ON→Project           │   │
+    │  │            →FOR_CLIENT→Client→IN_SECTOR→Sector  │   │
+    │  ├─────────────────────────────────────────────────┤   │
+    │  │ get_engineer_profile(engineer_id)               │   │
+    │  │   → full profile: skills+certs+projects+clients │   │
+    │  └─────────────────────────────────────────────────┘   │
+    │                                                        │
+    │  LLM loop: call tools → get ToolMessage → reason       │
+    │            → call more tools → final JSON answer       │
+    └─────────┬──────────────────────────────────────────────┘
+              │
+    ┌─────────▼──────────────────────────────────────────────┐
+    │  ③ GapAnalystAgent  (ReAct agent, 2 bound tools)       │
+    │                                                        │
+    │  Tools:                                                │
+    │  • get_team_skill_coverage(engineer_ids)               │
+    │      → what skills does the team already have?         │
+    │  • identify_skill_gaps(required_skills, engineer_ids)  │
+    │      → Neo4j set-difference: required MINUS covered    │
+    │                                                        │
+    │  LLM calls both, reasons about gaps, generates         │
+    │  Morocco-specific suggestions per uncovered skill      │
+    └─────────┬──────────────────────────────────────────────┘
+              │
+    ┌─────────▼──────────────────────────────────────────────┐
+    │  ④ ProposalDrafterAgent  (LLM, no tools)               │
+    │     Generates 400-word client-ready proposal           │
+    │     grounded in real graph data from prior agents      │
+    └─────────┬──────────────────────────────────────────────┘
+              │
+    ┌─────────▼──────────────────────────────────────────────┐
+    │  ⑤ GraphVisualizationAgent  (Neo4j only, no LLM)       │
+    │     Builds D3.js payload: nodes + edges subgraph       │
+    └─────────┬──────────────────────────────────────────────┘
               ▼
-      FastAPI → JSON → Browser renders engineer cards, D3 graph, proposal
+    FastAPI → JSON → Browser
+    (engineer cards, D3 force graph, agent trace with tool calls, proposal)
 ```
 
 ### The Graph Schema (Neo4j)
@@ -141,7 +157,7 @@ Browser → POST /api/v1/rfp/analyze (raw RFP text)
 ```
 (Engineer)-[:HAS_SKILL {proficiency: "expert|advanced|intermediate"}]→(Skill)
 (Engineer)-[:HOLDS_CERT]→(Certification)
-(Engineer)-[:WORKED_ON]→(Project)
+(Engineer)-[:WORKED_ON]→(Project {embedding: [...384 floats...]})
 (Engineer)-[:WORKS_AT]→(ESNFirm)
 (Project)-[:FOR_CLIENT]→(Client)
 (Project)-[:REQUIRED_SKILL]→(Skill)
@@ -150,57 +166,40 @@ Browser → POST /api/v1/rfp/analyze (raw RFP text)
 (Client)-[:IN_SECTOR]→(Sector)
 ```
 
+`Project.embedding` is a 384-dimensional vector (all-MiniLM-L6-v2) stored directly on the node, indexed by Neo4j's native vector index for cosine similarity search.
+
 ---
 
-## 🤖 The 4 Agents
+## 🤖 The Agents
 
 ### Agent 1 — RFPParserAgent
-**Input:** Raw RFP text | **Output:** Structured JSON
+Structured LLM call (not a tool-using agent — parsing is deterministic enough that a single LLM call with a strict JSON prompt is the right tool). Normalizes multilingual, free-text RFPs into typed structured fields. Falls back to safe defaults on parse failure.
 
-Uses Groq LLM with a strict JSON-only system prompt. Strips markdown artifacts with regex before parsing. Falls back to safe defaults on parse failure so the pipeline never crashes.
+### Agent 2 — TeamBuilderAgent *(ReAct agent)*
+Has 6 tools bound via `bind_tools()`. Typical autonomous tool call sequence:
+1. `semantic_project_search` → finds similar past projects by embedding similarity
+2. `graph_traverse_from_projects` → traverses graph to connected engineers
+3. `find_engineers_by_skills` → supplements with exact skill matches
+4. `find_engineers_by_compliance` → verifies hands-on compliance experience
+5. `get_engineer_profile` × N → deep-dives on top candidates before final answer
 
-**Why LLM here:** RFPs are multilingual and inconsistent. "RGPD" (French) and "GDPR" (English) are the same thing — the LLM normalizes this before any graph query runs.
+The LLM decides this sequence — it's not hardcoded.
 
-### Agent 2 — TeamBuilderAgent *(graph retrieval core)*
-**Input:** Structured requirements | **Output:** Ranked engineers with scores
-
-Runs 4 Cypher queries traversing different relationship paths, merges candidates, fetches full profiles, then asks the LLM to score each 0.0–1.0. The LLM adds nuance (years of experience, language fit) that pure graph queries can't express.
-
-**Why not just LLM for matching:** It has no knowledge of your database. Without graph retrieval feeding it real profiles, it hallucinates.
-
-### Agent 3 — GapAnalystAgent
-**Input:** Required skills + team engineer IDs | **Output:** Uncovered skills + suggestions
-
-One Cypher set-difference query finds gaps. LLM generates Morocco-specific mitigation suggestions per gap.
+### Agent 3 — GapAnalystAgent *(ReAct agent)*
+Has 2 tools. Calls `get_team_skill_coverage` first to understand what exists, then `identify_skill_gaps` to find what's missing. Generates Morocco-specific suggestions: Simplon.co Maroc, UM6P, ENSIAS, GDG Casablanca, specific ESN firms.
 
 ### Agent 4 — ProposalDrafterAgent
-**Input:** All prior agent outputs | **Output:** 400-word client proposal
-
-Grounded in real graph data — no hallucinated engineers, no placeholder brackets.
+Pure LLM generation grounded in structured context from Agents 1–3. No tools needed — the context is already fully structured.
 
 ---
 
-## 🕸️ Why Graph Retrieval Beats Cosine Similarity Here
+## 🕸️ GraphRAG vs. Vector Search vs. Plain Graph Retrieval
 
-| Query | Cosine / Vector Search | Structured Graph Retrieval |
+| Approach | How it works | What it misses |
 |---|---|---|
-| "Find engineers who know SAP" | ✅ Finds CVs mentioning SAP | ✅ Same |
-| "Find engineers with SAP **and** GDPR **hands-on** experience" | ⚠️ Approximate — depends on CV wording | ✅ Exact — traverses actual project records |
-| "Find team whose **combined** skills cover all requirements" | ❌ Cannot reason about teams | ✅ Multi-node graph traversal |
-| "Engineers who worked on banking projects **for French clients**" | ❌ Cannot follow 4-hop relationships | ✅ `(eng)→(proj)→(client)→(sector)` |
-| "Which skills are **missing** from this specific team?" | ❌ Structurally impossible | ✅ Set difference in one Cypher query |
-
-The signature 4-hop query:
-```cypher
-MATCH (eng:Engineer)-[:WORKED_ON]->(p:Project)
-      -[:FOR_CLIENT]->(cl:Client)
-      -[:IN_SECTOR]->(s:Sector {name: $sector})
-WITH eng, collect(DISTINCT cl.name) AS clients, count(DISTINCT p) AS projectCount
-RETURN eng.id, eng.name, clients, projectCount
-ORDER BY projectCount DESC
-```
-
-No embedding model produces this. It requires following 4 typed edges and aggregating across the traversal.
+| **Vector / cosine search** | Embeds query, finds similar documents | Can't follow relationships — doesn't know an engineer worked on a project |
+| **Plain graph retrieval** | Cypher exact-match queries | Misses semantic equivalents — "RGPD" ≠ "GDPR" without normalization |
+| **GraphRAG (this project)** | Vector search finds entry nodes → graph traversal enriches | Best of both: semantic awareness + relational depth |
 
 ---
 
@@ -211,44 +210,50 @@ No embedding model produces this. It requires following 4 typed edges and aggreg
 - Neo4j Desktop **or** Docker
 - Free [Groq API key](https://console.groq.com) (30 seconds)
 
-### Option A — Local (~5 min)
+### Local Setup
 
 ```bash
 git clone https://github.com/Othamane/OffshoreIQ.git
 cd offshoreiq
+
 python -m venv venv
-venv\Scripts\activate        # Windows: or source venv/bin/activate on Mac/Linux
-pip install -r requirements.txt
-cp .env.example .env         # fill in GROQ_API_KEY and NEO4J_PASSWORD
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # Mac/Linux
+
+pip install -r requirements.txt   # includes sentence-transformers
+```
+
+Configure `.env`:
+```env
+GROQ_API_KEY=gsk_your_key_here
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_neo4j_password
+LLM_MODEL=llama-3.3-70b-versatile
+```
+
+```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-Open `http://localhost:8000` → click **⟳ Seed Database** → paste an RFP → **Analyze**.
+Open `http://localhost:8000` → click **⟳ Seed Database**.
 
-### Option B — Docker Compose (~10 min, Neo4j included)
+> **First seed takes ~30s extra** — downloads the `all-MiniLM-L6-v2` embedding model (80MB, CPU-only, cached after first run), creates the Neo4j vector index, and embeds all 8 project descriptions.
+
+### Docker Compose
 
 ```bash
-cp .env.example .env         # set GROQ_API_KEY
+cp .env.example .env   # set GROQ_API_KEY
 docker compose up --build
 curl -X POST http://localhost:8000/api/v1/admin/seed
 ```
-
-- App: `http://localhost:8000`
-- Neo4j Browser: `http://localhost:7474` (neo4j / offshoreiq123)
 
 ---
 
 ## 🔑 Groq API Key (Free)
 
 1. [console.groq.com](https://console.groq.com) → sign up → Create API Key
-2. Paste into `.env` as `GROQ_API_KEY`
-3. Set `LLM_MODEL=llama-3.3-70b-versatile`
-
-| Model | Speed | Quality |
-|---|---|---|
-| `llama-3.3-70b-versatile` | Fast | ⭐⭐⭐⭐⭐ ← use this |
-| `llama-3.1-8b-instant` | Fastest | ⭐⭐⭐ |
-| `mixtral-8x7b-32768` | Medium | ⭐⭐⭐⭐ |
+2. Set `LLM_MODEL=llama-3.3-70b-versatile` in `.env`
 
 ---
 
@@ -258,24 +263,62 @@ curl -X POST http://localhost:8000/api/v1/admin/seed
 |---|---|---|
 | `GET` | `/` | Web UI |
 | `GET` | `/api/v1/health` | Health check |
-| `POST` | `/api/v1/admin/seed` | Seed Neo4j with simulated data |
-| `POST` | `/api/v1/rfp/analyze` | Run the full MAS pipeline |
+| `POST` | `/api/v1/admin/seed` | Seed Neo4j + create vector index + embed projects |
+| `POST` | `/api/v1/rfp/analyze` | Run the full MAS + GraphRAG pipeline |
 | `GET` | `/docs` | Swagger UI |
+
+---
+
+## 📂 Project Structure
+
+```
+offshoreiq/
+├── app/
+│   ├── agents/
+│   │   ├── orchestrator.py           # LangGraph StateGraph — 5 nodes
+│   │   ├── rfp_parser_agent.py       # Agent 1: structured JSON extraction
+│   │   ├── team_builder_agent.py     # Agent 2: ReAct agent, 6 bound tools, GraphRAG
+│   │   ├── gap_analyst_agent.py      # Agent 3: ReAct agent, 2 bound tools
+│   │   ├── proposal_drafter_agent.py # Agent 4: LLM proposal generation
+│   │   └── llm_provider.py           # Groq LLM singleton
+│   ├── api/
+│   │   └── routes.py                 # FastAPI endpoints
+│   ├── core/
+│   │   ├── config.py                 # Pydantic Settings
+│   │   └── logging.py                # Structured logging
+│   ├── db/
+│   │   ├── neo4j_db.py               # Neo4j driver singleton
+│   │   └── seeder.py                 # Data + vector index + embeddings
+│   ├── models/
+│   │   └── schemas.py                # Pydantic I/O models
+│   ├── services/
+│   │   ├── graphrag_service.py       # Multi-hop Cypher queries
+│   │   └── embedding_service.py      # sentence-transformers + Neo4j vector index
+│   ├── static/css/main.css
+│   ├── static/js/main.js             # D3.js force graph + UI
+│   ├── templates/index.html
+│   └── main.py
+├── tests/test_api.py
+├── .env.example
+├── Dockerfile
+├── docker-compose.yml
+└── requirements.txt
+```
 
 ---
 
 ## 🌍 Simulated Dataset
 
-| Entity | Count | Examples |
+| Entity | Count | Details |
 |---|---|---|
-| Engineers | 8 | Youssef El Amrani (Casablanca, 6y), Sara Benali (Rabat, 4y)... |
-| ESN Firms | 5 | CGI Morocco, Capgemini Maroc, SQLI Maroc, Devoteam, NearShore Makers |
-| Clients | 8 | BNP Paribas, AXA, Orange SA, Santander, TotalEnergies... |
-| Projects | 8 | Core Banking Modernization (18m), Cyber Risk Platform (14m)... |
-| Skills | 25 | Python, SAP S/4HANA, Kubernetes, GDPR Compliance, Salesforce... |
-| Certifications | 8 | AWS Solutions Architect, SAP S/4HANA Certified, CISSP... |
+| Engineers | 8 | Across Casablanca, Rabat, Marrakech |
+| ESN Firms | 5 | CGI Morocco, Capgemini Maroc, SQLI, Devoteam, NearShore Makers |
+| Clients | 8 | BNP Paribas, AXA, Orange, Santander, TotalEnergies... |
+| Projects | 8 | Each with a rich description **embedded as a 384-dim vector** |
+| Skills | 25 | Python, SAP S/4HANA, Kubernetes, Salesforce... |
+| Certifications | 8 | AWS SA, SAP S/4HANA, CISSP, ISO 27001 Lead Auditor... |
 | Compliance Frameworks | 5 | GDPR, ISO 27001, PCI-DSS, SOC 2, HDS |
-| Relationships | 40+ | HAS_SKILL, WORKED_ON, FOR_CLIENT, IN_SECTOR, HOLDS_CERT... |
+| Graph Relationships | 40+ | HAS_SKILL, WORKED_ON, FOR_CLIENT, IN_SECTOR, HOLDS_CERT... |
 
 ---
 
@@ -286,28 +329,26 @@ pip install pytest httpx
 pytest tests/ -v
 ```
 
-No live Neo4j or Groq API needed — pipeline is mocked.
-
 ---
 
 ## 🔮 Roadmap
 
 | Extension | Effort | What it adds |
 |---|---|---|
-| **True GraphRAG** — `sentence-transformers` on project descriptions + Neo4j vector index | Medium | Semantic search as graph entry point — makes this genuinely hybrid |
-| Real LinkedIn data ingestion | Medium | Real engineer profiles instead of simulated data |
+| Embed engineer bio/CV text for semantic profile search | Low | Richer GraphRAG entry points |
+| Conditional edges in LangGraph (retry on low confidence) | Medium | True agentic branching, not linear pipeline |
 | JWT auth | Low | Multi-tenant access per ESN firm |
-| PDF proposal export | Low | Download proposal as formatted PDF |
-| Neo4j GDS centrality scoring | Medium | Rank by network influence, not just skill count |
-| Availability nodes | Medium | `(Engineer)-[:AVAILABLE_FROM]→(Date)` |
+| PDF proposal export | Low | Downloadable formatted proposal |
+| Neo4j GDS centrality scoring | Medium | Rank engineers by network influence |
+| Availability + rate card nodes | Medium | Budget and timeline-aware matching |
 
 ---
 
 ## 🇲🇦 Moroccan Market Context
 
-Morocco's nearshore IT sector serves 500+ ESN firms targeting French and Spanish multinationals, generating ~$2B/year with ~100,000 engineers. Key hubs: Casablanca (CFC, Casanearshore), Rabat (Technopolis), Marrakech.
+Morocco's nearshore IT sector serves 500+ ESN firms targeting French and Spanish multinationals, generating ~$2B/year with ~100,000 engineers. Hubs: Casablanca (CFC, Casanearshore), Rabat (Technopolis), Marrakech.
 
-The RFP-matching process this project automates currently takes 2–4 weeks manually at firms like SQLI Maroc, Devoteam Maroc, and Capgemini Maroc.
+The RFP-to-proposal process this automates currently takes 2–4 weeks manually at firms like SQLI Maroc, Devoteam Maroc, and Capgemini Maroc.
 
 ---
 
@@ -317,4 +358,4 @@ MIT
 
 ---
 
-*Stack: FastAPI · Neo4j · LangGraph · LangChain · Groq LLM · D3.js*
+*Stack: FastAPI · Neo4j (graph + vector index) · LangGraph · LangChain · sentence-transformers · Groq LLM · D3.js*
