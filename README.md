@@ -1,8 +1,7 @@
 # ⬡ OffshoreIQ
 
-> **Knowledge Graph + GraphRAG + Multi-Agent IT Talent Matching for Moroccan Nearshore**
-> Real MAS (ReAct agents with bound tools) · True GraphRAG (vector + graph) · Neo4j · LangGraph · FastAPI · Groq LLM
-
+> **Knowledge Graph + GraphRAG + Agentic Pipeline for Moroccan Nearshore IT Matching**
+> ReAct Agents with Bound Tools · True GraphRAG (vector + graph) · Neo4j · LangGraph · FastAPI · Groq LLM
 ---
 
 ## 📸 Screenshots
