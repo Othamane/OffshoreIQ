@@ -30,27 +30,11 @@ When a French bank sends an RFP saying *"SAP S/4HANA team, GDPR compliance, Fren
 
 ---
 
-## ⚙️ What Makes This a Real MAS + Real GraphRAG
-
-### ✅ Real Multi-Agent System (ReAct pattern)
-
-Previous version: Python functions calling Neo4j directly, then passing results to an LLM. The LLM had no agency — it only scored candidates handed to it.
-
-Current version: Each agent has **tools bound via LangChain `bind_tools()`**. The LLM:
-1. Receives the task and a list of available tools with their schemas
-2. **Decides autonomously** which tools to call and in what order
-3. Receives tool results back as `ToolMessage` objects
-4. Loops — inspects results, calls more tools if needed, reasons toward a conclusion
-5. Produces a structured final answer
-
-This is the **ReAct (Reason + Act) pattern** — the LLM is reasoning and acting, not just generating text.
+## ⚙️ Technical Assessment
 
 ### ✅ True GraphRAG (vector similarity → graph traversal)
 
-Previous version: Cypher queries with exact keyword matching. No embeddings, no similarity search. That's graph retrieval, not GraphRAG.
-
-Current version implements the two-step GraphRAG pattern:
-
+Implements the genuine two-step GraphRAG pattern:
 ```
 Step 1 — Vector Search (semantic entry point):
   Embed the RFP text with sentence-transformers (all-MiniLM-L6-v2)
@@ -66,8 +50,23 @@ Step 2 — Graph Traversal (relational enrichment):
 
 Neither step alone is sufficient:
 - Step 1 alone: finds similar projects but can't tell you which engineers worked on them
-- Step 2 alone: exact keyword matching misses semantic equivalents ("RGPD" vs "GDPR", "cloud migration" vs "infrastructure modernization")
+- Step 2 alone: exact keyword matching misses semantic equivalents ("RGPD" vs "GDPR")
 - Together: semantically aware entry + structured relational enrichment = GraphRAG
+
+### ⚠️ Agentic Pipeline with ReAct agents — not a full MAS
+
+Each agent has **tools bound via LangChain `bind_tools()`**. The LLM:
+1. Receives the task and a list of available tools with their schemas
+2. **Decides autonomously** which tools to call and in what order
+3. Receives tool results back as `ToolMessage` objects
+4. Loops — inspects results, calls more tools if needed, reasons toward a conclusion
+5. Produces a structured final answer
+
+This is the **ReAct (Reason + Act) pattern** and the tool-calling is genuine.
+
+**What this is NOT:** agents do not communicate peer-to-peer. There is no supervisor dynamically routing between them. The pipeline is linear — each agent runs, finishes, and hands off via shared LangGraph state. A true MAS in the academic sense requires dynamic inter-agent communication, which this doesn't have.
+
+**Accurate label: an agentic pipeline where each step is a real ReAct agent with tool use.**
 
 ---
 
